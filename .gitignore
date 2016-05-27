@@ -1,0 +1,8 @@
+/DttReader/*.db
+/DttReader/.vs
+/DttReader/Release
+/DttReader/Debug
+/DttReader/ipch
+/DttReader/DttReader/Release
+/DttReader/DttReader/Debug
+/DttReader/DttReader/*.user
