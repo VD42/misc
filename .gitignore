@@ -6,3 +6,5 @@
 /DttReader/DttReader/Release
 /DttReader/DttReader/Debug
 /DttReader/DttReader/*.user
+/DttReader/*.sdf
+/DttReader/*.opensdf

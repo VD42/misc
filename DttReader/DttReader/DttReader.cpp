@@ -50,24 +50,43 @@ public:
 	unsigned __int32 nSignature;
 	unsigned __int32 nCount;
 	unsigned __int32 nStartFileOffsetsOffset;
-	unsigned __int32 nWTPStringsOffset;
+	unsigned __int32 nTypesOffset;
 	unsigned __int32 nFileNamesOffset;
 	unsigned __int32 nFileLengthsOffset;
 	unsigned __int32 nOffset5;
 	__int32 nNull;
 	std::vector<unsigned __int32> tStartFileOffsets;
-	std::vector<unsigned __int32> tWTPStrings;
+	std::vector<unsigned __int32> tTypes;
 	std::vector<std::string> tFileNames;
 	std::vector<unsigned __int32> tFileLengths;
 	unsigned __int32 nSomething1;
-	unsigned __int32 nSomethingFlagOffset;
+	unsigned __int32 nSomethingArray1Offset;
 	unsigned __int32 nCRCsOffset;
-	unsigned __int32 nSomething2Offset;
-	unsigned __int32 nSomethingFlag;
+	unsigned __int32 nSomethingArray2Offset;
+	std::shared_ptr<char> tSomethingArray1;
 	std::vector<unsigned __int32> tCRCs;
-	unsigned __int32 nSomething2;
-	std::vector<std::shared_ptr<char>> tDATAs;
+	std::shared_ptr<char> tSomethingArray2;
+	std::vector<std::vector<std::shared_ptr<char>>> tDATAs;
+	std::vector<std::vector<unsigned __int32>> tDATALengths;
 
+
+	void Shift(FArchive & ar, unsigned __int32 nPos)
+	{
+		if (ar.Position() > nPos)
+			throw 0;
+		while (ar.Position() < nPos)
+		{
+			if (ar.IsReading())
+			{
+				if (ar.Read(1).get()[0] != 0)
+					throw 0;
+			}
+			else if (ar.IsWriting())
+			{
+				ar.Write(std::shared_ptr<char>(new char[1]{ 0 }).get(), 1);
+			}
+		}
+	}
 
 	void Serialize(FArchive & ar)
 	{
@@ -76,31 +95,30 @@ public:
 			throw 0;
 		ar << nCount;
 		ar << nStartFileOffsetsOffset;
-		ar << nWTPStringsOffset;
+		ar << nTypesOffset;
 		ar << nFileNamesOffset;
 		ar << nFileLengthsOffset;
 		ar << nOffset5;
 		ar << nNull;
 		if (ar.Position() != nStartFileOffsetsOffset)
 			throw 0;
+		Shift(ar, nStartFileOffsetsOffset);
 		for (unsigned __int32 i = 0; i < nCount; i++)
 		{
 			if (ar.IsReading())
 				tStartFileOffsets.emplace_back();
 			ar << tStartFileOffsets[i];
 		}
-		if (ar.Position() != nWTPStringsOffset)
-			throw 0;
+		Shift(ar, nTypesOffset);
 		for (unsigned __int32 i = 0; i < nCount; i++)
 		{
 			if (ar.IsReading())
-				tWTPStrings.emplace_back();
-			ar << tWTPStrings[i];
-			if (tWTPStrings[i] != 0x00707477) // wtp\0
+				tTypes.emplace_back();
+			ar << tTypes[i];
+			if (tTypes[i] != 0x00707477) // wtp\0
 				throw 0;
 		}
-		if (ar.Position() != nFileNamesOffset)
-			throw 0;
+		Shift(ar, nFileNamesOffset);
 		unsigned __int32 nFileNamesLength = 0;
 		if (ar.IsWriting())
 		{
@@ -123,56 +141,79 @@ public:
 					ar.Write(std::shared_ptr<char>(new char[1]{ 0 }).get(), 1);
 			}
 		}
-		if (ar.IsReading() && ar.Position() != nFileLengthsOffset)
-		{
-			ar.Read(2);
-		}
-		if (ar.IsWriting())
-		{
-			while (ar.Position() < nFileLengthsOffset)
-				ar.Write(std::shared_ptr<char>(new char[1]{ 0 }).get(), 1);
-		}
-		if (ar.Position() != nFileLengthsOffset)
-			throw 0;
+		Shift(ar, nFileLengthsOffset);
 		for (unsigned __int32 i = 0; i < nCount; i++)
 		{
 			if (ar.IsReading())
 				tFileLengths.emplace_back();
 			ar << tFileLengths[i];
 		}
-		if (ar.Position() != nOffset5)
-			throw 0;
+		Shift(ar, nOffset5);
 		unsigned __int32 nCurrentPosition = ar.Position();
 		ar << nSomething1;
-		ar << nSomethingFlagOffset;
+		ar << nSomethingArray1Offset;
 		ar << nCRCsOffset;
-		ar << nSomething2Offset;
-		if (ar.Position() != nCurrentPosition + nSomethingFlagOffset)
-			throw 0;
-		ar << nSomethingFlag;
-		if (ar.Position() != nCurrentPosition + nCRCsOffset)
-			throw 0;
+		ar << nSomethingArray2Offset;
+		Shift(ar, nCurrentPosition + nSomethingArray1Offset);
+		if (ar.IsReading())
+			tSomethingArray1 = ar.Read(nCRCsOffset - nSomethingArray1Offset);
+		else if (ar.IsWriting())
+			ar.Write(tSomethingArray1.get(), nCRCsOffset - nSomethingArray1Offset);
+		Shift(ar, nCurrentPosition + nCRCsOffset);
 		for (unsigned __int32 i = 0; i < nCount; i++)
 		{
 			if (ar.IsReading())
 				tCRCs.emplace_back();
 			ar << tCRCs[i];
 		}
-		if (ar.Position() != nCurrentPosition + nSomething2Offset)
-			throw 0;
-		ar << nSomething2;
+		Shift(ar, nCurrentPosition + nSomethingArray2Offset);
+		if (ar.IsReading())
+			tSomethingArray2 = ar.Read(tStartFileOffsets[0] - nSomethingArray2Offset - nCurrentPosition);
+		else if (ar.IsWriting())
+			ar.Write(tSomethingArray2.get(), tStartFileOffsets[0] - nSomethingArray2Offset - nCurrentPosition);
 		for (unsigned __int32 i = 0; i < nCount; i++)
 		{
+			Shift(ar, tStartFileOffsets[i]);
 			if (ar.IsReading())
 			{
-				while (ar.Position() < tStartFileOffsets[i])
+				tDATAs.push_back(std::vector<std::shared_ptr<char>>());
+				tDATALengths.push_back(std::vector<unsigned __int32>());
+				unsigned __int32 nLength = tFileLengths[i];
+				unsigned __int32 nBegin = ar.Position();
+				unsigned __int32 nStart = 0;
+				if (nLength >= 4096)
 				{
-					__int32 tmp;
-					ar << tmp;
-					if (tmp != 0)
-						throw 0;
+					while (ar.Position() <= nBegin + nLength - 4096)
+					{
+						unsigned __int32 nSign = 0;
+						ar << nSign;
+						if (nSign == 0x20534444)
+						{
+							if (nStart > 0)
+							{
+								unsigned __int32 nCurPos = ar.Position();
+								ar.Seek(nStart);
+								tDATAs[i].push_back(ar.Read(nCurPos - 4 - nStart));
+								tDATALengths[i].push_back(nCurPos - 4 - nStart);
+								ar.Seek(nCurPos);
+							}
+							nStart = ar.Position() - 4;
+						}
+						ar.Seek(ar.Position() + 4096 - 4);
+					}
 				}
-				tDATAs.push_back(ar.Read(tFileLengths[i]));
+				if (nStart > 0)
+				{
+					ar.Seek(nStart);
+					tDATAs[i].push_back(ar.Read(nBegin + nLength - nStart));
+					tDATALengths[i].push_back(nBegin + nLength - nStart);
+				}
+				else
+				{
+					ar.Seek(nBegin);
+					tDATAs[i].push_back(ar.Read(nLength));
+					tDATALengths[i].push_back(nLength);
+				}
 
 				// test CRC
 				//unsigned __int32 crc = crc32(tDATAs[i].get(), tFileLengths[i], 0/*nSomethingFlag*/);
@@ -181,13 +222,10 @@ public:
 			}
 			else if (ar.IsWriting())
 			{
-				while (ar.Position() < tStartFileOffsets[i])
-					ar.Write(std::shared_ptr<char>(new char[1]{ 0 }).get(), 1);
-				ar.Write(tDATAs[i].get(), tFileLengths[i]);
+				for (unsigned __int32 j = 0; j < tDATAs[i].size(); j++)
+					ar.Write(tDATAs[i][j].get(), tDATALengths[i][j]);
 			}
 		}
-		//if (ar.IsReading() && ar.Position() != ar.Length())
-		//	throw 0;
 	}
 };
 
@@ -203,10 +241,28 @@ std::wstring StupidStringToWString(const std::string & s)
 // -p "C:\Users\vladi\Downloads\Новая папка\dtt textures\.dtt textures\subtitle_7030_us.dtt" "C:\Users\vladi\Downloads\Новая папка\dtt textures\.dtt textures - unpacked\subtitle_7030_us.dtt"
 // -p "C:\Users\vladi\Downloads\Новая папка\dtt textures\.dtt textures\ui_hud_us.dtt" "C:\Users\vladi\Downloads\Новая папка\dtt textures\.dtt textures - unpacked\ui_hud_us.dtt"
 // -p "C:\Users\vladi\Downloads\Новая папка\dtt textures\.dtt textures" "C:\Users\vladi\Downloads\Новая папка\dtt textures\.dtt textures - unpacked"
+
+// -u "D:\Downloads\ui_loading_us\ui_loading_us\RU_HEX_ui_title_us.dtt" "D:\Downloads\ui_loading_us\ui_loading_us\test"
+// -p "D:\Downloads\ui_loading_us\ui_loading_us\RU_HEX_ui_title_us.dtt" "D:\Downloads\ui_loading_us\ui_loading_us\test"
+// -u "D:\Downloads\ui_loading_us\ui_loading_us" "D:\Downloads\ui_loading_us\ui_loading_us\test"
+// -p "D:\Downloads\ui_loading_us\ui_loading_us" "D:\Downloads\ui_loading_us\ui_loading_us\test"
+
+// -u "D:\Downloads\ui_loading_us\ui_loading_us\TRANSFORMERS Devastation ddt\put_dtt" "D:\Downloads\ui_loading_us\ui_loading_us\TRANSFORMERS Devastation ddt\dtt_unpacked"
+// -p "D:\Downloads\ui_loading_us\ui_loading_us\TRANSFORMERS Devastation ddt\put_dtt" "D:\Downloads\ui_loading_us\ui_loading_us\TRANSFORMERS Devastation ddt\dtt_unpacked"
 int wmain(int argc, wchar_t ** argv)
 {
 	if (argc < 4)
-		throw 0;
+	{
+		wprintf_s(L"unpack:\r\n");
+		wprintf_s(L"-u <dtt_file> <folder_for_unpacked_files>\r\n");
+		wprintf_s(L"-u <folder_with_dtt_files> <folder_for_unpacked_files>\r\n");
+		wprintf_s(L"pack:\r\n");
+		wprintf_s(L"-p <ddt_file> <folder_for_unpacked_files>\r\n");
+		wprintf_s(L"-p <folder_with_dtt_files> <folder_for_unpacked_files>\r\n");
+		wprintf_s(L"\r\n");
+		wprintf_s(L"note: path without trailing slashes!\r\n");
+ 		return 0;
+	}
 
 	if (std::wstring(argv[1]) == L"-u")
 	{
@@ -219,7 +275,7 @@ int wmain(int argc, wchar_t ** argv)
 			// directory
 
 			std::wstring search_path(in);
-			search_path += L"\\*";
+			search_path += L"\\*.dtt";
 
 			std::vector<std::wstring> m_tFiles;
 			HANDLE hFind = INVALID_HANDLE_VALUE;
@@ -244,12 +300,17 @@ int wmain(int argc, wchar_t ** argv)
 
 				std::wstring out_path(out + L"\\" + m_tFiles[i]);
 
-				for (unsigned __int32 i = 0; i < file.nCount; i++)
+				for (unsigned __int32 j = 0; j < file.tDATAs.size(); j++)
 				{
 					_wmkdir(out_path.c_str());
-					std::fstream f_out(out_path +  + L"\\" + StupidStringToWString(file.tFileNames[i]) + L".dds", std::ios::out | std::ios::binary);
-					f_out.write(file.tDATAs[i].get(), file.tFileLengths[i]);
-					f_out.close();
+					for (unsigned __int32 k = 0; k < file.tDATAs[j].size(); k++)
+					{
+						wchar_t index[10];
+						swprintf_s(index, L"%d", k + 1);
+						std::fstream f_out(out_path + +L"\\" + StupidStringToWString(file.tFileNames[j]) + L"." + index + L".dds", std::ios::out | std::ios::binary);
+						f_out.write(file.tDATAs[j][k].get(), file.tDATALengths[j][k]);
+						f_out.close();
+					}
 				}
 			}
 		}
@@ -265,12 +326,17 @@ int wmain(int argc, wchar_t ** argv)
 
 			f.close();
 
-			for (unsigned __int32 i = 0; i < file.nCount; i++)
+			for (unsigned __int32 j = 0; j < file.tDATAs.size(); j++)
 			{
 				_wmkdir(out.c_str());
-				std::fstream f_out(out + L"\\" + StupidStringToWString(file.tFileNames[i]) + L".dds", std::ios::out | std::ios::binary);
-				f_out.write(file.tDATAs[i].get(), file.tFileLengths[i]);
-				f_out.close();
+				for (unsigned __int32 k = 0; k < file.tDATAs[j].size(); k++)
+				{
+					wchar_t index[10];
+					swprintf_s(index, L"%d", k + 1);
+					std::fstream f_out(out + +L"\\" + StupidStringToWString(file.tFileNames[j]) + L"." + index + L".dds", std::ios::out | std::ios::binary);
+					f_out.write(file.tDATAs[j][k].get(), file.tDATALengths[j][k]);
+					f_out.close();
+				}
 			}
 		}
 
@@ -288,7 +354,7 @@ int wmain(int argc, wchar_t ** argv)
 			// directory
 
 			std::wstring search_path(in);
-			search_path += L"\\*";
+			search_path += L"\\*.dtt";
 
 			std::vector<std::wstring> m_tFiles;
 			HANDLE hFind = INVALID_HANDLE_VALUE;
@@ -315,30 +381,35 @@ int wmain(int argc, wchar_t ** argv)
 
 				std::wstring out_path(out + L"\\" + m_tFiles[i]);
 
-				for (unsigned __int32 i = 0; i < file.nCount; i++)
+				for (unsigned __int32 j = 0; j < file.tDATAs.size(); j++)
 				{
-					_wmkdir(out_path.c_str());
-					std::fstream f_out(out_path + L"\\" + StupidStringToWString(file.tFileNames[i]) + L".dds", std::ios::out | std::ios::binary);
-					f_out.write(file.tDATAs[i].get(), file.tFileLengths[i]);
-					f_out.close();
-
-					file.tStartFileOffsets[i] = nStartOffset;
-					std::wstring file_path = out + L"\\" + StupidStringToWString(file.tFileNames[i]) + L".dds";
-					DWORD dwAttrib2 = GetFileAttributes(file_path.c_str());
-					if (dwAttrib2 == INVALID_FILE_ATTRIBUTES || dwAttrib2 & FILE_ATTRIBUTE_DIRECTORY)
+					file.tStartFileOffsets[j] = nStartOffset;
+					for (unsigned __int32 k = 0; k < file.tDATAs[j].size(); k++)
 					{
-						nStartOffset += file.tFileLengths[i];
-						continue;
+						wchar_t index[10];
+						swprintf_s(index, L"%d", k + 1);
+						std::wstring file_path = out_path + L"\\" + StupidStringToWString(file.tFileNames[j]) + L"." + index + L".dds";
+						DWORD dwAttrib2 = GetFileAttributes(file_path.c_str());
+						if (dwAttrib2 == INVALID_FILE_ATTRIBUTES || dwAttrib2 & FILE_ATTRIBUTE_DIRECTORY)
+							continue;
+						std::ifstream f3(file_path, std::ios::in | std::ios::binary);
+						f3.seekg(0, f3.end);
+						unsigned __int64 nRealLength = f3.tellg();
+						f3.seekg(0, f3.beg);
+						unsigned __int64 nAlignedLength = nRealLength;
+						if (k + 1 < file.tDATAs[j].size())
+							nAlignedLength = nRealLength + (nRealLength % 4096 > 0 ? 4096 - (nRealLength % 4096) : 0);
+						file.tDATAs[j][k] = std::shared_ptr<char>(new char[nAlignedLength]);
+						memset(file.tDATAs[j][k].get(), 0, nAlignedLength);
+						f3.read(file.tDATAs[j][k].get(), nRealLength);
+						f3.close();
+						file.tDATALengths[j][k] = nAlignedLength;
 					}
-					std::ifstream f3(file_path, std::ios::in | std::ios::binary);
-					f3.seekg(0, f3.end);
-					unsigned __int64 nLength = f3.tellg();
-					f3.seekg(0, f3.beg);
-					file.tFileLengths[i] = nLength;
-					file.tDATAs[i] = std::shared_ptr<char>(new char[nLength]);
-					f3.read(file.tDATAs[i].get(), nLength);
-					f3.close();
-					nStartOffset += file.tFileLengths[i];
+					unsigned __int64 nLength = 0;
+					for (unsigned __int32 k = 0; k < file.tDATAs[j].size(); k++)
+						nLength += file.tDATALengths[j][k];
+					file.tFileLengths[j] = nLength;
+					nStartOffset += nLength;
 				}
 
 				std::fstream f2(in + L"\\" + m_tFiles[i], std::ios::out | std::ios::binary);
@@ -361,25 +432,35 @@ int wmain(int argc, wchar_t ** argv)
 
 			unsigned __int64 nStartOffset = file.tStartFileOffsets[0];
 
-			for (unsigned __int32 i = 0; i < file.nCount; i++)
+			for (unsigned __int32 j = 0; j < file.tDATAs.size(); j++)
 			{
-				file.tStartFileOffsets[i] = nStartOffset;
-				std::wstring file_path = out + L"\\" + StupidStringToWString(file.tFileNames[i]) + L".dds";
-				DWORD dwAttrib2 = GetFileAttributes(file_path.c_str());
-				if (dwAttrib2 == INVALID_FILE_ATTRIBUTES || dwAttrib2 & FILE_ATTRIBUTE_DIRECTORY)
+				file.tStartFileOffsets[j] = nStartOffset;
+				for (unsigned __int32 k = 0; k < file.tDATAs[j].size(); k++)
 				{
-					nStartOffset += file.tFileLengths[i];
-					continue;
+					wchar_t index[10];
+					swprintf_s(index, L"%d", k + 1);
+					std::wstring file_path = out + L"\\" + StupidStringToWString(file.tFileNames[j]) + L"." + index + L".dds";
+					DWORD dwAttrib2 = GetFileAttributes(file_path.c_str());
+					if (dwAttrib2 == INVALID_FILE_ATTRIBUTES || dwAttrib2 & FILE_ATTRIBUTE_DIRECTORY)
+						continue;
+					std::ifstream f3(file_path, std::ios::in | std::ios::binary);
+					f3.seekg(0, f3.end);
+					unsigned __int64 nRealLength = f3.tellg();
+					f3.seekg(0, f3.beg);
+					unsigned __int64 nAlignedLength = nRealLength;
+					if (k + 1 < file.tDATAs[j].size())
+						nAlignedLength = nRealLength + (nRealLength % 4096 > 0 ? 4096 - (nRealLength % 4096) : 0);
+					file.tDATAs[j][k] = std::shared_ptr<char>(new char[nAlignedLength]);
+					memset(file.tDATAs[j][k].get(), 0, nAlignedLength);
+					f3.read(file.tDATAs[j][k].get(), nRealLength);
+					f3.close();
+					file.tDATALengths[j][k] = nAlignedLength;
 				}
-				std::ifstream f3(file_path, std::ios::in | std::ios::binary);
-				f3.seekg(0, f3.end);
-				unsigned __int64 nLength = f3.tellg();
-				f3.seekg(0, f3.beg);
-				file.tFileLengths[i] = nLength;
-				file.tDATAs[i] = std::shared_ptr<char>(new char[nLength]);
-				f3.read(file.tDATAs[i].get(), nLength);
-				f3.close();
-				nStartOffset += file.tFileLengths[i];
+				unsigned __int64 nLength = 0;
+				for (unsigned __int32 k = 0; k < file.tDATAs[j].size(); k++)
+					nLength += file.tDATALengths[j][k];
+				file.tFileLengths[j] = nLength;
+				nStartOffset += nLength;
 			}
 
 			std::fstream f2(in, std::ios::out | std::ios::binary);
