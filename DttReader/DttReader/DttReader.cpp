@@ -73,13 +73,13 @@ public:
 	void Shift(FArchive & ar, unsigned __int32 nPos)
 	{
 		if (ar.Position() > nPos)
-			throw 0;
+			throw new std::exception("Bad read exception!");
 		while (ar.Position() < nPos)
 		{
 			if (ar.IsReading())
 			{
 				if (ar.Read(1).get()[0] != 0)
-					throw 0;
+					throw new std::exception("Bad read exception!");
 			}
 			else if (ar.IsWriting())
 			{
@@ -92,7 +92,7 @@ public:
 	{
 		ar << nSignature;
 		if (nSignature != 0x00544144) // DAT\0
-			throw 0;
+			throw new std::exception("Bad signature found!");
 		ar << nCount;
 		ar << nStartFileOffsetsOffset;
 		ar << nTypesOffset;
@@ -100,8 +100,6 @@ public:
 		ar << nFileLengthsOffset;
 		ar << nOffset5;
 		ar << nNull;
-		if (ar.Position() != nStartFileOffsetsOffset)
-			throw 0;
 		Shift(ar, nStartFileOffsetsOffset);
 		for (unsigned __int32 i = 0; i < nCount; i++)
 		{
@@ -116,7 +114,7 @@ public:
 				tTypes.emplace_back();
 			ar << tTypes[i];
 			if (tTypes[i] != 0x00707477) // wtp\0
-				throw 0;
+				throw new std::exception("Only wtp type supported!");
 		}
 		Shift(ar, nFileNamesOffset);
 		unsigned __int32 nFileNamesLength = 0;
@@ -251,46 +249,86 @@ std::wstring StupidStringToWString(const std::string & s)
 // -p "D:\Downloads\ui_loading_us\ui_loading_us\TRANSFORMERS Devastation ddt\put_dtt" "D:\Downloads\ui_loading_us\ui_loading_us\TRANSFORMERS Devastation ddt\dtt_unpacked"
 int wmain(int argc, wchar_t ** argv)
 {
-	if (argc < 4)
+	try
 	{
-		wprintf_s(L"unpack:\r\n");
-		wprintf_s(L"-u <dtt_file> <folder_for_unpacked_files>\r\n");
-		wprintf_s(L"-u <folder_with_dtt_files> <folder_for_unpacked_files>\r\n");
-		wprintf_s(L"pack:\r\n");
-		wprintf_s(L"-p <ddt_file> <folder_for_unpacked_files>\r\n");
-		wprintf_s(L"-p <folder_with_dtt_files> <folder_for_unpacked_files>\r\n");
-		wprintf_s(L"\r\n");
-		wprintf_s(L"note: path without trailing slashes!\r\n");
- 		return 0;
-	}
-
-	if (std::wstring(argv[1]) == L"-u")
-	{
-		std::wstring in(argv[2]);
-		std::wstring out(argv[3]);
-
-		DWORD dwAttrib = GetFileAttributes(in.c_str());
-		if (dwAttrib != INVALID_FILE_ATTRIBUTES && (dwAttrib & FILE_ATTRIBUTE_DIRECTORY))
+		if (argc < 4)
 		{
-			// directory
+			wprintf_s(L"unpack:\r\n");
+			wprintf_s(L"-u <dtt_file> <folder_for_unpacked_files>\r\n");
+			wprintf_s(L"-u <folder_with_dtt_files> <folder_for_unpacked_files>\r\n");
+			wprintf_s(L"pack:\r\n");
+			wprintf_s(L"-p <ddt_file> <folder_for_unpacked_files>\r\n");
+			wprintf_s(L"-p <folder_with_dtt_files> <folder_for_unpacked_files>\r\n");
+			wprintf_s(L"\r\n");
+			wprintf_s(L"note: path without trailing slashes!\r\n");
+			return 0;
+		}
 
-			std::wstring search_path(in);
-			search_path += L"\\*.dtt";
+		if (std::wstring(argv[1]) == L"-u")
+		{
+			std::wstring in(argv[2]);
+			std::wstring out(argv[3]);
 
-			std::vector<std::wstring> m_tFiles;
-			HANDLE hFind = INVALID_HANDLE_VALUE;
-			WIN32_FIND_DATA ffd;
-			hFind = FindFirstFile(search_path.c_str(), &ffd);
-			do
+			DWORD dwAttrib = GetFileAttributes(in.c_str());
+			if (dwAttrib == INVALID_FILE_ATTRIBUTES)
 			{
-				if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-					continue;
-				m_tFiles.push_back(ffd.cFileName);
-			} while (FindNextFile(hFind, &ffd) != 0);
-
-			for (unsigned __int32 i = 0; i < m_tFiles.size(); i++)
+				printf_s("Can't get file attributes! Error code: %d.\r\n", GetLastError());
+				throw new std::exception("Can't get file attributes!");
+			}
+			if (dwAttrib & FILE_ATTRIBUTE_DIRECTORY)
 			{
-				std::fstream f(in + L"\\" + m_tFiles[i], std::ios::in | std::ios::binary);
+				// directory
+
+				std::wstring search_path(in);
+				search_path += L"\\*.dtt";
+
+				std::vector<std::wstring> m_tFiles;
+				HANDLE hFind = INVALID_HANDLE_VALUE;
+				WIN32_FIND_DATA ffd;
+				hFind = FindFirstFile(search_path.c_str(), &ffd);
+				if (hFind == INVALID_HANDLE_VALUE)
+				{
+					printf_s("Can't scan path! Error code: %d.\r\n", GetLastError());
+					throw new std::exception("Can't scan path!");
+				}
+				do
+				{
+					if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+						continue;
+					m_tFiles.push_back(ffd.cFileName);
+				} while (FindNextFile(hFind, &ffd) != 0);
+
+				for (unsigned __int32 i = 0; i < m_tFiles.size(); i++)
+				{
+					std::fstream f(in + L"\\" + m_tFiles[i], std::ios::in | std::ios::binary);
+					FArchive ar(&f, FArchive::Type::Read);
+
+					FDTT file;
+					file.Serialize(ar);
+
+					f.close();
+
+					std::wstring out_path(out + L"\\" + m_tFiles[i]);
+
+					for (unsigned __int32 j = 0; j < file.tDATAs.size(); j++)
+					{
+						_wmkdir(out_path.c_str());
+						for (unsigned __int32 k = 0; k < file.tDATAs[j].size(); k++)
+						{
+							wchar_t index[10];
+							swprintf_s(index, L"%d", k + 1);
+							std::fstream f_out(out_path + +L"\\" + StupidStringToWString(file.tFileNames[j]) + L"." + index + L".dds", std::ios::out | std::ios::binary);
+							f_out.write(file.tDATAs[j][k].get(), file.tDATALengths[j][k]);
+							f_out.close();
+						}
+					}
+				}
+			}
+			else
+			{
+				// file
+
+				std::fstream f(in, std::ios::in | std::ios::binary);
 				FArchive ar(&f, FArchive::Type::Read);
 
 				FDTT file;
@@ -298,78 +336,113 @@ int wmain(int argc, wchar_t ** argv)
 
 				f.close();
 
-				std::wstring out_path(out + L"\\" + m_tFiles[i]);
-
 				for (unsigned __int32 j = 0; j < file.tDATAs.size(); j++)
 				{
-					_wmkdir(out_path.c_str());
+					_wmkdir(out.c_str());
 					for (unsigned __int32 k = 0; k < file.tDATAs[j].size(); k++)
 					{
 						wchar_t index[10];
 						swprintf_s(index, L"%d", k + 1);
-						std::fstream f_out(out_path + +L"\\" + StupidStringToWString(file.tFileNames[j]) + L"." + index + L".dds", std::ios::out | std::ios::binary);
+						std::fstream f_out(out + +L"\\" + StupidStringToWString(file.tFileNames[j]) + L"." + index + L".dds", std::ios::out | std::ios::binary);
 						f_out.write(file.tDATAs[j][k].get(), file.tDATALengths[j][k]);
 						f_out.close();
 					}
 				}
 			}
+
+			return 0;
 		}
-		else
+
+		if (std::wstring(argv[1]) == L"-p")
 		{
-			// file
+			std::wstring in(argv[2]);
+			std::wstring out(argv[3]);
 
-			std::fstream f(in, std::ios::in | std::ios::binary);
-			FArchive ar(&f, FArchive::Type::Read);
-
-			FDTT file;
-			file.Serialize(ar);
-
-			f.close();
-
-			for (unsigned __int32 j = 0; j < file.tDATAs.size(); j++)
+			DWORD dwAttrib = GetFileAttributes(in.c_str());
+			if (dwAttrib == INVALID_FILE_ATTRIBUTES)
 			{
-				_wmkdir(out.c_str());
-				for (unsigned __int32 k = 0; k < file.tDATAs[j].size(); k++)
+				printf_s("Can't get file attributes! Error code: %d.\r\n", GetLastError());
+				throw new std::exception("Can't get file attributes!");
+			}
+			if (dwAttrib & FILE_ATTRIBUTE_DIRECTORY)
+			{
+				// directory
+
+				std::wstring search_path(in);
+				search_path += L"\\*.dtt";
+
+				std::vector<std::wstring> m_tFiles;
+				HANDLE hFind = INVALID_HANDLE_VALUE;
+				WIN32_FIND_DATA ffd;
+				hFind = FindFirstFile(search_path.c_str(), &ffd);
+				if (hFind == INVALID_HANDLE_VALUE)
 				{
-					wchar_t index[10];
-					swprintf_s(index, L"%d", k + 1);
-					std::fstream f_out(out + +L"\\" + StupidStringToWString(file.tFileNames[j]) + L"." + index + L".dds", std::ios::out | std::ios::binary);
-					f_out.write(file.tDATAs[j][k].get(), file.tDATALengths[j][k]);
-					f_out.close();
+					printf_s("Can't scan path! Error code: %d.\r\n", GetLastError());
+					throw new std::exception("Can't scan path!");
+				}
+				do
+				{
+					if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+						continue;
+					m_tFiles.push_back(ffd.cFileName);
+				} while (FindNextFile(hFind, &ffd) != 0);
+
+				for (unsigned __int32 i = 0; i < m_tFiles.size(); i++)
+				{
+					std::fstream f(in + L"\\" + m_tFiles[i], std::ios::in | std::ios::binary);
+					FArchive ar(&f, FArchive::Type::Read);
+
+					FDTT file;
+					file.Serialize(ar);
+
+					f.close();
+
+					unsigned __int64 nStartOffset = file.tStartFileOffsets[0];
+
+					std::wstring out_path(out + L"\\" + m_tFiles[i]);
+
+					for (unsigned __int32 j = 0; j < file.tDATAs.size(); j++)
+					{
+						file.tStartFileOffsets[j] = nStartOffset;
+						for (unsigned __int32 k = 0; k < file.tDATAs[j].size(); k++)
+						{
+							wchar_t index[10];
+							swprintf_s(index, L"%d", k + 1);
+							std::wstring file_path = out_path + L"\\" + StupidStringToWString(file.tFileNames[j]) + L"." + index + L".dds";
+							DWORD dwAttrib2 = GetFileAttributes(file_path.c_str());
+							if (dwAttrib2 == INVALID_FILE_ATTRIBUTES || dwAttrib2 & FILE_ATTRIBUTE_DIRECTORY)
+								continue;
+							std::ifstream f3(file_path, std::ios::in | std::ios::binary);
+							f3.seekg(0, f3.end);
+							unsigned __int64 nRealLength = f3.tellg();
+							f3.seekg(0, f3.beg);
+							unsigned __int64 nAlignedLength = nRealLength;
+							if (k + 1 < file.tDATAs[j].size())
+								nAlignedLength = nRealLength + (nRealLength % 4096 > 0 ? 4096 - (nRealLength % 4096) : 0);
+							file.tDATAs[j][k] = std::shared_ptr<char>(new char[nAlignedLength]);
+							memset(file.tDATAs[j][k].get(), 0, nAlignedLength);
+							f3.read(file.tDATAs[j][k].get(), nRealLength);
+							f3.close();
+							file.tDATALengths[j][k] = nAlignedLength;
+						}
+						unsigned __int64 nLength = 0;
+						for (unsigned __int32 k = 0; k < file.tDATAs[j].size(); k++)
+							nLength += file.tDATALengths[j][k];
+						file.tFileLengths[j] = nLength;
+						nStartOffset += nLength;
+					}
+
+					std::fstream f2(in + L"\\" + m_tFiles[i], std::ios::out | std::ios::binary);
+					FArchive ar2(&f2, FArchive::Type::Write);
+					file.Serialize(ar2);
+					f2.close();
 				}
 			}
-		}
-
-		return 0;
-	}
-
-	if (std::wstring(argv[1]) == L"-p")
-	{
-		std::wstring in(argv[2]);
-		std::wstring out(argv[3]);
-
-		DWORD dwAttrib = GetFileAttributes(in.c_str());
-		if (dwAttrib != INVALID_FILE_ATTRIBUTES && (dwAttrib & FILE_ATTRIBUTE_DIRECTORY))
-		{
-			// directory
-
-			std::wstring search_path(in);
-			search_path += L"\\*.dtt";
-
-			std::vector<std::wstring> m_tFiles;
-			HANDLE hFind = INVALID_HANDLE_VALUE;
-			WIN32_FIND_DATA ffd;
-			hFind = FindFirstFile(search_path.c_str(), &ffd);
-			do
+			else
 			{
-				if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-					continue;
-				m_tFiles.push_back(ffd.cFileName);
-			} while (FindNextFile(hFind, &ffd) != 0);
+				// file
 
-			for (unsigned __int32 i = 0; i < m_tFiles.size(); i++)
-			{
-				std::fstream f(in + L"\\" + m_tFiles[i], std::ios::in | std::ios::binary);
+				std::fstream f(in, std::ios::in | std::ios::binary);
 				FArchive ar(&f, FArchive::Type::Read);
 
 				FDTT file;
@@ -379,8 +452,6 @@ int wmain(int argc, wchar_t ** argv)
 
 				unsigned __int64 nStartOffset = file.tStartFileOffsets[0];
 
-				std::wstring out_path(out + L"\\" + m_tFiles[i]);
-
 				for (unsigned __int32 j = 0; j < file.tDATAs.size(); j++)
 				{
 					file.tStartFileOffsets[j] = nStartOffset;
@@ -388,7 +459,7 @@ int wmain(int argc, wchar_t ** argv)
 					{
 						wchar_t index[10];
 						swprintf_s(index, L"%d", k + 1);
-						std::wstring file_path = out_path + L"\\" + StupidStringToWString(file.tFileNames[j]) + L"." + index + L".dds";
+						std::wstring file_path = out + L"\\" + StupidStringToWString(file.tFileNames[j]) + L"." + index + L".dds";
 						DWORD dwAttrib2 = GetFileAttributes(file_path.c_str());
 						if (dwAttrib2 == INVALID_FILE_ATTRIBUTES || dwAttrib2 & FILE_ATTRIBUTE_DIRECTORY)
 							continue;
@@ -412,64 +483,23 @@ int wmain(int argc, wchar_t ** argv)
 					nStartOffset += nLength;
 				}
 
-				std::fstream f2(in + L"\\" + m_tFiles[i], std::ios::out | std::ios::binary);
+				std::fstream f2(in, std::ios::out | std::ios::binary);
 				FArchive ar2(&f2, FArchive::Type::Write);
 				file.Serialize(ar2);
 				f2.close();
 			}
 		}
-		else
-		{
-			// file
-
-			std::fstream f(in, std::ios::in | std::ios::binary);
-			FArchive ar(&f, FArchive::Type::Read);
-
-			FDTT file;
-			file.Serialize(ar);
-
-			f.close();
-
-			unsigned __int64 nStartOffset = file.tStartFileOffsets[0];
-
-			for (unsigned __int32 j = 0; j < file.tDATAs.size(); j++)
-			{
-				file.tStartFileOffsets[j] = nStartOffset;
-				for (unsigned __int32 k = 0; k < file.tDATAs[j].size(); k++)
-				{
-					wchar_t index[10];
-					swprintf_s(index, L"%d", k + 1);
-					std::wstring file_path = out + L"\\" + StupidStringToWString(file.tFileNames[j]) + L"." + index + L".dds";
-					DWORD dwAttrib2 = GetFileAttributes(file_path.c_str());
-					if (dwAttrib2 == INVALID_FILE_ATTRIBUTES || dwAttrib2 & FILE_ATTRIBUTE_DIRECTORY)
-						continue;
-					std::ifstream f3(file_path, std::ios::in | std::ios::binary);
-					f3.seekg(0, f3.end);
-					unsigned __int64 nRealLength = f3.tellg();
-					f3.seekg(0, f3.beg);
-					unsigned __int64 nAlignedLength = nRealLength;
-					if (k + 1 < file.tDATAs[j].size())
-						nAlignedLength = nRealLength + (nRealLength % 4096 > 0 ? 4096 - (nRealLength % 4096) : 0);
-					file.tDATAs[j][k] = std::shared_ptr<char>(new char[nAlignedLength]);
-					memset(file.tDATAs[j][k].get(), 0, nAlignedLength);
-					f3.read(file.tDATAs[j][k].get(), nRealLength);
-					f3.close();
-					file.tDATALengths[j][k] = nAlignedLength;
-				}
-				unsigned __int64 nLength = 0;
-				for (unsigned __int32 k = 0; k < file.tDATAs[j].size(); k++)
-					nLength += file.tDATALengths[j][k];
-				file.tFileLengths[j] = nLength;
-				nStartOffset += nLength;
-			}
-
-			std::fstream f2(in, std::ios::out | std::ios::binary);
-			FArchive ar2(&f2, FArchive::Type::Write);
-			file.Serialize(ar2);
-			f2.close();
-		}
 	}
-
+	catch (const std::exception & e)
+	{
+		printf_s(e.what());
+		throw;
+	}
+	catch (...)
+	{
+		printf_s("Everything is very bad!");
+		throw;
+	}
     return 0;
 }
 
