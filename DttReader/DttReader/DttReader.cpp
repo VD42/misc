@@ -6,6 +6,7 @@
 #include <fstream>
 #include <vector>
 #include <windows.h>
+#include <shlwapi.h>
 
 static unsigned __int32 CRCTablesSB8[] =
 {
@@ -415,6 +416,39 @@ int wmain(int argc, wchar_t ** argv)
 							std::ifstream f3(file_path, std::ios::in | std::ios::binary);
 							f3.seekg(0, f3.end);
 							unsigned __int64 nRealLength = f3.tellg();
+							f3.seekg(0, f3.beg);
+							if (nRealLength < 32)
+								throw new std::exception("Wrong DDS file!");
+							unsigned __int32 nMimMapCount = 0;
+							f3.seekg(28, f3.beg);
+							f3.read((char *)&nMimMapCount, 4);
+							if (nMimMapCount != *(int *)(file.tDATAs[j][k].get() + 28))
+							{
+								nMimMapCount = *(int *)(file.tDATAs[j][k].get() + 28);
+								if (nMimMapCount == 0)
+									nMimMapCount = 1;
+								f3.close();
+								wchar_t mms[10];
+								swprintf_s(mms, L"%d", nMimMapCount);
+								std::wstring sParam(L"-m " + std::wstring(mms) + L" -o \"" + out_path + L"\" \"" + file_path + L"\"");
+								SHELLEXECUTEINFO info = {};
+								info.cbSize = sizeof(SHELLEXECUTEINFO);
+								info.fMask = SEE_MASK_NOCLOSEPROCESS;
+								info.hwnd = NULL;
+								info.lpVerb = NULL;
+								info.lpFile = L"texconv.exe";
+								info.lpParameters = sParam.c_str();
+								wchar_t sPath[MAX_PATH];
+								GetModuleFileName(NULL, sPath, MAX_PATH);
+								PathRemoveFileSpec(sPath);
+								info.lpDirectory = sPath;
+								info.nShow = SW_SHOW;
+								info.hInstApp = NULL;
+								if (!ShellExecuteEx(&info))
+									throw new std::exception("texconv.exe not found!");
+								WaitForSingleObject(info.hProcess, INFINITE);
+								f3.open(file_path, std::ios::in | std::ios::binary);
+							}
 							f3.seekg(0, f3.beg);
 							unsigned __int64 nAlignedLength = nRealLength;
 							if (k + 1 < file.tDATAs[j].size())
