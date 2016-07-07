@@ -155,6 +155,31 @@ namespace WH40JFS
             fs1.Close();
         }
 
+        public class Adler32Computer
+        {
+            private int a = 1;
+            private int b = 0;
+
+            public int Checksum
+            {
+                get
+                {
+                    return ((b * 65536) + a);
+                }
+            }
+
+            private static readonly int Modulus = 65521;
+
+            public void Update(byte[] data, int offset, int length)
+            {
+                for (int counter = 0; counter < length; ++counter)
+                {
+                    a = (a + (data[offset + counter])) % Modulus;
+                    b = (b + a) % Modulus;
+                }
+            }
+        }
+
         public static void Pack(string filename, string out_path)
         {
             string list_filename = Path.Combine(Path.GetDirectoryName(filename), Path.GetFileNameWithoutExtension(filename) + ".jfslist");
@@ -188,6 +213,19 @@ namespace WH40JFS
                     System.IO.Compression.DeflateStream ds = new System.IO.Compression.DeflateStream(ms, System.IO.Compression.CompressionLevel.Optimal, true);
                     fs3.CopyTo(ds);
                     ds.Close();
+
+                    Adler32Computer ad32 = new Adler32Computer();
+                    byte[] BufForAdlerCalc = new byte[fs3.Length];
+                    fs3.Seek(0, SeekOrigin.Begin);
+                    fs3.Read(BufForAdlerCalc, 0, BufForAdlerCalc.Length);
+                    ad32.Update(BufForAdlerCalc, 0, BufForAdlerCalc.Length);
+                    byte[] AdlerRes = BitConverter.GetBytes(ad32.Checksum);
+                    BinaryHelper bh = new BinaryHelper();
+                    bh.WriteByte(ms, AdlerRes[3]);
+                    bh.WriteByte(ms, AdlerRes[2]);
+                    bh.WriteByte(ms, AdlerRes[1]);
+                    bh.WriteByte(ms, AdlerRes[0]);
+
                     ms.Seek(0, SeekOrigin.Begin);
                     tDatas.Add(new byte[ms.Length]);
                     ms.Read(tDatas[tDatas.Count - 1], 0, tDatas[tDatas.Count - 1].Length);

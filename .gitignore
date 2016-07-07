@@ -3,7 +3,7 @@
 Release
 Debug
 ipch
-/DttReader/DttReader/*.user
+*.user
 *.sdf
 *.opensdf
 *.opendb
