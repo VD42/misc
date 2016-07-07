@@ -23,28 +23,67 @@ namespace CFSIReader
             m_tFiles = new List<FileInfo>();
         }
 
+        public UInt32 ReadVariableUInt32(Stream s)
+        {
+            byte nValue1 = ReadByte(s);
+            if (nValue1 < 252)
+                return nValue1;
+            if (nValue1 == 252)
+            {
+                UInt16 nValue2 = ReadUInt16(s);
+                return nValue2;
+            }
+            if (nValue1 == 253)
+            {
+                UInt32 nValue2 = ReadUInt32(s); // ?
+                return nValue2;
+            }
+            throw new Exception("x64? not realy!");
+        }
+
+        public void WriteVariableUInt32(Stream s, UInt32 Value)
+        {
+            if (Value < 252)
+            {
+                WriteByte(s, (byte)Value);
+                return;
+            }
+            if (Value <= 0xffff)
+            {
+                WriteByte(s, 252);
+                WriteUInt16(s, (UInt16)Value);
+                return;
+            }
+            if (Value <= 0xffffffff)
+            {
+                WriteByte(s, 253); // ?
+                WriteUInt32(s, (UInt32)Value);
+                return;
+            }
+            throw new Exception("x64? not realy!");
+        }
+
         public void DeSerialize(Stream s)
         {
             Console.WriteLine("Reading files table...");
-            byte nCount = 0;
-            while (nCount != 1)
-                nCount = ReadByte(s); // ?
-            while (nCount > 0)
+            UInt32 nPathsCount = ReadVariableUInt32(s);
+            for (int j = 0; j < nPathsCount; j++)
             {
                 byte nDirNameLength = ReadByte(s);
                 byte[] pDirName = new byte[nDirNameLength];
                 s.Read(pDirName, 0, pDirName.Length);
-                string sDirName = ASCIIEncoding.ASCII.GetString(pDirName);
-                nCount = ReadByte(s);
-                for (int i = 0; i < nCount; i++)
+                string sDirName = UTF8Encoding.UTF8.GetString(pDirName);
+                UInt32 nFilesCount = ReadVariableUInt32(s);
+                for (int i = 0; i < nFilesCount; i++)
                 {
                     byte nFileNameLength = ReadByte(s);
                     byte[] pFileName = new byte[nFileNameLength];
                     s.Read(pFileName, 0, pFileName.Length);
-                    string sFileName = ASCIIEncoding.ASCII.GetString(pFileName);
+                    string sFileName = UTF8Encoding.UTF8.GetString(pFileName);
                     UInt32 nOffset = ReadUInt32(s);
                     UInt32 nLength = ReadUInt32(s);
-                    m_tFiles.Add(new FileInfo() {
+                    m_tFiles.Add(new FileInfo()
+                    {
                         m_sFileName = sDirName + sFileName,
                         m_nOffset = nOffset << 4,
                         m_nLength = nLength
@@ -53,8 +92,8 @@ namespace CFSIReader
             }
             while (s.Position % 16 != 0)
             {
-                nCount = ReadByte(s);
-                if (nCount != 0)
+                byte nTmp = ReadByte(s);
+                if (nTmp != 0)
                     throw new Exception("Bad read!");
             }
         }
@@ -84,9 +123,7 @@ namespace CFSIReader
 
         public void Pack(Stream s, string sDir, Dictionary<string, List<string>> files)
         {
-            if (false)
-                WriteUInt16(s, 0xe8fc); // priority?
-            WriteByte(s, 1);
+            WriteVariableUInt32(s, (UInt32)files.Keys.Count);
             UInt32 nCurrentOffset = 0;
             foreach (var item in files)
             {
@@ -95,13 +132,13 @@ namespace CFSIReader
                     path = path.Substring(1);
                 if (path != "")
                     path += "\\";
-                byte[] pDirName = ASCIIEncoding.ASCII.GetBytes(path.Replace('\\', '/'));
+                byte[] pDirName = UTF8Encoding.UTF8.GetBytes(path.Replace('\\', '/'));
                 WriteByte(s, (byte)pDirName.Length);
                 s.Write(pDirName, 0, pDirName.Length);
-                WriteByte(s, (byte)item.Value.Count);
+                WriteVariableUInt32(s, (UInt32)item.Value.Count);
                 for (int i = 0; i < item.Value.Count; i++)
                 {
-                    byte[] pFileName = ASCIIEncoding.ASCII.GetBytes(item.Value[i].Replace('\\', '/'));
+                    byte[] pFileName = UTF8Encoding.UTF8.GetBytes(item.Value[i].Replace('\\', '/'));
                     WriteByte(s, (byte)pFileName.Length);
                     s.Write(pFileName, 0, pFileName.Length);
                     Stream fs = File.Open(Path.Combine(item.Key, item.Value[i]), FileMode.Open);
